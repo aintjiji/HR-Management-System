@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<!--
+  admin-leaves.html — Leave Request Approvals
+  Admin reviews, approves, or rejects employee leave applications.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leave Approvals — HR Portal Admin</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+Shell.render({ type:'admin', activePage:'admin-leaves.html', pageTitle:'Leave Approvals' });
+
+let filterStatus = 'pending';
+
+function render() {
+  const leaves = DB.all('leave_requests')
+    .filter(l => filterStatus === 'all' || l.status === filterStatus)
+    .sort((a,b) => b.created_at.localeCompare(a.created_at));
+
+  const counts = {
+    all: DB.all('leave_requests').length,
+    pending: DB.filter('leave_requests', l => l.status === 'pending').length,
+    approved: DB.filter('leave_requests', l => l.status === 'approved').length,
+    rejected: DB.filter('leave_requests', l => l.status === 'rejected').length,
+  };
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Leave Approvals</h1>
+        <div class="page-sub">Review and action employee leave requests</div>
+      </div>
+    </div>
+
+    <div class="tabs">
+      ${['pending','approved','rejected','all'].map(s => `
+        <button class="tab-btn ${filterStatus === s ? 'active' : ''}" onclick="setFilter('${s}')">
+          ${s.charAt(0).toUpperCase() + s.slice(1)} (${counts[s]})
+        </button>
+      `).join('')}
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            ${leaves.length === 0
+              ? '<tr><td colspan="8" class="text-center text-muted" style="padding:2rem;">No requests found</td></tr>'
+              : leaves.map(l => {
+                  const emp = DB.find('employees', e => e.id === l.employee_id);
+                  const days = Math.ceil((new Date(l.end_date) - new Date(l.start_date)) / 86400000) + 1;
+                  return `<tr>
+                    <td>
+                      <div style="font-weight:500; font-size:0.85rem;">${Utils.sanitize(emp?.full_name || 'Unknown')}</div>
+                      <div style="font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono);">${Utils.sanitize(emp?.emp_code || '')}</div>
+                    </td>
+                    <td><span class="badge badge-blue">${Utils.sanitize(l.type)}</span></td>
+                    <td class="text-mono" style="font-size:0.8rem;">${Utils.sanitize(l.start_date)}</td>
+                    <td class="text-mono" style="font-size:0.8rem;">${Utils.sanitize(l.end_date)}</td>
+                    <td style="font-weight:600;">${days}</td>
+                    <td style="font-size:0.82rem; max-width:180px;">${Utils.sanitize(l.reason.substring(0,60))}${l.reason.length>60?'…':''}</td>
+                    <td>${Utils.statusBadge(l.status)}</td>
+                    <td>
+                      ${l.status === 'pending' ? `
+                        <button class="btn btn-primary btn-sm" onclick="decide(${l.id},'approved')">✓ Approve</button>
+                        <button class="btn btn-danger btn-sm" onclick="decide(${l.id},'rejected')">✕ Reject</button>
+                      ` : `<span style="font-size:0.75rem; color:var(--text-muted);">—</span>`}
+                    </td>
+                  </tr>`;
+                }).join('')
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function setFilter(s) { filterStatus = s; render(); }
+
+function decide(id, decision) {
+  DB.update('leave_requests', id, { status: decision });
+  const leave = DB.find('leave_requests', l => l.id === id);
+  const emp   = DB.find('employees', e => e.id === leave.employee_id);
+  const admin = Auth.getSession();
+  DB.log(admin.fullName, 'LEAVE_' + decision.toUpperCase(), `${emp?.full_name} — ${leave.type} leave ${leave.start_date} to ${leave.end_date}`);
+  Utils.toast(`Leave request ${decision}.`, decision === 'approved' ? 'success' : 'warning');
+  render();
+}
+
+render();
+</script>
+</body>
+</html>

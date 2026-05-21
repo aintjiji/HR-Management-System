@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<!--
+  admin-dashboard.html — Administrator Home Dashboard
+  Real-time snapshot: present/absent/late counts, recent activity,
+  pending leave requests, and department summaries.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard — HR Portal</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+const session = Shell.render({ type:'admin', activePage:'admin-dashboard.html', pageTitle:'Admin Dashboard' });
+
+function render() {
+  const today       = Utils.todayISO();
+  const employees   = DB.filter('employees', e => e.status === 'active');
+  const totalEmp    = employees.length;
+  const todayAtt    = DB.filter('attendance', a => a.date === today);
+  const present     = todayAtt.filter(a => a.status === 'present' || a.status === 'late').length;
+  const late        = todayAtt.filter(a => a.status === 'late').length;
+  const absent      = totalEmp - present;
+  const pendLeaves  = DB.filter('leave_requests', l => l.status === 'pending');
+  const recentLogs  = DB.all('activity_logs').slice(-8).reverse();
+
+  // Department breakdown
+  const depts = DB.all('departments');
+  const deptRows = depts.map(d => {
+    const deptEmps = employees.filter(e => e.department_id === d.id);
+    const deptPresent = todayAtt.filter(a => deptEmps.some(e => e.id === a.employee_id)).length;
+    return { name: d.name, total: deptEmps.length, present: deptPresent };
+  }).filter(d => d.total > 0);
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Admin Dashboard</h1>
+        <div class="page-sub">Live overview for ${Utils.sanitize(Utils.todayLabel())}</div>
+      </div>
+      <a href="admin-employees.html" class="btn btn-primary">+ Add Employee</a>
+    </div>
+
+    <!-- Key Metrics -->
+    <div class="stats-grid">
+      <div class="stat-card accent">
+        <div class="stat-label">Total Employees</div>
+        <div class="stat-value">${totalEmp}</div>
+        <div class="stat-sub">active headcount</div>
+      </div>
+      <div class="stat-card accent">
+        <div class="stat-label">Present Today</div>
+        <div class="stat-value">${present}</div>
+        <div class="stat-sub">${totalEmp > 0 ? Math.round(present/totalEmp*100) : 0}% attendance rate</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-label">Absent Today</div>
+        <div class="stat-value">${absent}</div>
+        <div class="stat-sub">not checked in</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="stat-label">Late Arrivals</div>
+        <div class="stat-value">${late}</div>
+        <div class="stat-sub">past threshold</div>
+      </div>
+      <div class="stat-card ${pendLeaves.length > 0 ? 'warning' : ''}">
+        <div class="stat-label">Pending Leaves</div>
+        <div class="stat-value">${pendLeaves.length}</div>
+        <div class="stat-sub"><a href="admin-leaves.html">Review requests →</a></div>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+
+      <!-- Department Breakdown -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:1rem;">Department Attendance</div>
+        ${deptRows.map(d => {
+          const pct = d.total > 0 ? Math.round(d.present / d.total * 100) : 0;
+          return `
+            <div style="margin-bottom:0.85rem;">
+              <div class="flex justify-between" style="margin-bottom:0.3rem;">
+                <span style="font-size:0.85rem;">${Utils.sanitize(d.name)}</span>
+                <span style="font-size:0.78rem; color:var(--text-muted);">${d.present}/${d.total} · ${pct}%</span>
+              </div>
+              <div style="height:6px; background:var(--bg-hover); border-radius:3px; overflow:hidden;">
+                <div style="height:100%; width:${pct}%; background:${pct >= 80 ? 'var(--accent)' : pct >= 50 ? 'var(--warning)' : 'var(--danger)'}; border-radius:3px; transition:width 0.5s;"></div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <!-- Pending Leaves Preview -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Pending Leave Requests</span>
+          <a href="admin-leaves.html" class="btn btn-secondary btn-sm">All</a>
+        </div>
+        ${pendLeaves.length === 0
+          ? '<div class="empty-state"><p>No pending requests</p></div>'
+          : pendLeaves.slice(0, 5).map(l => {
+              const emp = DB.find('employees', e => e.id === l.employee_id);
+              return `
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:0.6rem 0; border-bottom:1px solid var(--border); gap:0.5rem;">
+                  <div>
+                    <div style="font-size:0.85rem; font-weight:500;">${Utils.sanitize(emp?.full_name || 'Unknown')}</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">${Utils.sanitize(l.type)} · ${Utils.sanitize(l.start_date)} to ${Utils.sanitize(l.end_date)}</div>
+                  </div>
+                  ${Utils.statusBadge(l.status)}
+                </div>
+              `;
+            }).join('')
+        }
+      </div>
+    </div>
+
+    <!-- Recent Activity Log -->
+    <div class="card" style="margin-top:1rem;">
+      <div class="card-header">
+        <span class="card-title">Recent Activity</span>
+        <a href="admin-logs.html" class="btn btn-secondary btn-sm">Full Audit Log</a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Actor</th><th>Action</th><th>Details</th><th>IP</th><th>Time</th></tr></thead>
+          <tbody>
+            ${recentLogs.length === 0
+              ? '<tr><td colspan="5" class="text-center text-muted" style="padding:2rem;">No activity recorded</td></tr>'
+              : recentLogs.map(l => `
+                  <tr>
+                    <td style="font-size:0.82rem; font-weight:500;">${Utils.sanitize(l.actor)}</td>
+                    <td><span class="badge badge-gray" style="font-size:0.7rem;">${Utils.sanitize(l.action)}</span></td>
+                    <td style="font-size:0.8rem; color:var(--text-secondary);">${Utils.sanitize(l.details)}</td>
+                    <td class="text-mono" style="font-size:0.75rem; color:var(--text-muted);">${Utils.sanitize(l.ip_address)}</td>
+                    <td style="font-size:0.75rem; color:var(--text-muted);">${Utils.formatDateTime(l.timestamp)}</td>
+                  </tr>
+                `).join('')
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+render();
+</script>
+</body>
+</html>

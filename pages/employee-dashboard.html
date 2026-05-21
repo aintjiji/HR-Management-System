@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<!--
+  employee-dashboard.html — Employee Home Dashboard
+  Shows today's attendance status, leave summary, recent activity,
+  and company notices. Serves as the hub for the employee portal.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — HR Portal</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+
+    <div class="page-content" id="page-content">
+      <!-- Rendered by JS -->
+    </div>
+  </div>
+</div>
+
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+const session = Shell.render({
+  type: 'employee',
+  activePage: 'employee-dashboard.html',
+  pageTitle: 'Dashboard',
+});
+
+function render() {
+  const emp = DB.find('employees', e => e.id === session.employeeId);
+  const settings = Utils.getSettings();
+  const today = Utils.todayISO();
+
+  // Today's attendance
+  const todayAtt = DB.find('attendance', a => a.employee_id === session.employeeId && a.date === today);
+
+  // Leave summary
+  const allLeaves = DB.filter('leave_requests', l => l.employee_id === session.employeeId);
+  const approvedLeaves = allLeaves.filter(l => l.status === 'approved').length;
+  const pendingLeaves  = allLeaves.filter(l => l.status === 'pending').length;
+  const usedCasual     = allLeaves.filter(l => l.status === 'approved' && l.type === 'casual').length;
+  const usedSick       = allLeaves.filter(l => l.status === 'approved' && l.type === 'sick').length;
+
+  // Recent activity for this employee
+  const logs = DB.filter('activity_logs', l => l.actor === emp.full_name)
+    .slice(-5).reverse();
+
+  // Notices
+  const notices = DB.all('notifications').slice(-3).reverse();
+
+  // Attendance status display
+  let attStatusHTML = '';
+  if (todayAtt && todayAtt.check_out) {
+    attStatusHTML = `<div class="attendance-status status-checked-out"><span class="status-dot"></span> Checked Out — ${Utils.formatTime(todayAtt.check_out)}</div>`;
+  } else if (todayAtt && todayAtt.check_in) {
+    attStatusHTML = `<div class="attendance-status status-checked-in"><span class="status-dot"></span> Checked In — ${Utils.formatTime(todayAtt.check_in)}</div>`;
+  } else {
+    attStatusHTML = `<div class="attendance-status status-not-in"><span class="status-dot"></span> Not Checked In</div>`;
+  }
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Good day, ${Utils.sanitize(emp.full_name.split(' ')[0])}</h1>
+        <div class="page-sub">${Utils.sanitize(Utils.getRoleName(emp.role_id))} · ${Utils.sanitize(Utils.getDepartmentName(emp.department_id))}</div>
+      </div>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="stats-grid">
+      <div class="stat-card accent">
+        <div class="stat-label">Attendance Today</div>
+        <div class="stat-value">${todayAtt ? (todayAtt.check_out ? '✓' : '↑') : '—'}</div>
+        <div class="stat-sub">${todayAtt ? Utils.statusBadge(todayAtt.status) : 'No record yet'}</div>
+      </div>
+      <div class="stat-card info">
+        <div class="stat-label">Casual Leave</div>
+        <div class="stat-value">${settings.casual_leave_days - usedCasual}</div>
+        <div class="stat-sub">days remaining of ${settings.casual_leave_days}</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="stat-label">Sick Leave</div>
+        <div class="stat-value">${settings.sick_leave_days - usedSick}</div>
+        <div class="stat-sub">days remaining of ${settings.sick_leave_days}</div>
+      </div>
+      <div class="stat-card ${pendingLeaves > 0 ? 'warning' : ''}">
+        <div class="stat-label">Pending Requests</div>
+        <div class="stat-value">${pendingLeaves}</div>
+        <div class="stat-sub">${approvedLeaves} approved total</div>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem; margin-bottom:1rem;">
+
+      <!-- Attendance Card -->
+      <div class="clock-card">
+        <div class="clock-time" id="live-clock">${Utils.timeNow()}</div>
+        <div class="clock-date">${Utils.todayLabel()}</div>
+        ${attStatusHTML}
+        <a href="employee-attendance.html" class="btn btn-primary btn-sm">
+          ${todayAtt && !todayAtt.check_out && todayAtt.check_in ? '⬇ Check Out' : (todayAtt ? '✓ View Record' : '⬆ Check In')}
+        </a>
+      </div>
+
+      <!-- Notices -->
+      <div class="card" style="overflow:hidden;">
+        <div class="card-header">
+          <span class="card-title">📢 Latest Notices</span>
+          <a href="employee-notices.html" class="btn btn-secondary btn-sm">All</a>
+        </div>
+        ${notices.length === 0
+          ? '<div class="empty-state"><p>No notices</p></div>'
+          : notices.map(n => `
+              <div style="padding:0.75rem 0; border-bottom:1px solid var(--border);">
+                <div style="font-size:0.85rem; font-weight:600;">${Utils.sanitize(n.title)}</div>
+                <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">${Utils.sanitize(n.body.substring(0, 80))}…</div>
+                <div style="font-size:0.72rem; color:var(--text-muted); margin-top:4px;">${Utils.formatDateTime(n.created_at)}</div>
+              </div>
+            `).join('')
+        }
+      </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Recent Activity</span>
+      </div>
+      ${logs.length === 0
+        ? '<div class="empty-state"><div class="empty-icon">📋</div><p>No activity yet</p></div>'
+        : `<div class="table-wrap"><table>
+            <thead><tr><th>Action</th><th>Details</th><th>Time</th></tr></thead>
+            <tbody>
+              ${logs.map(l => `
+                <tr>
+                  <td class="text-mono" style="font-size:0.78rem;">${Utils.sanitize(l.action)}</td>
+                  <td style="font-size:0.82rem;">${Utils.sanitize(l.details)}</td>
+                  <td style="font-size:0.78rem; color:var(--text-muted);">${Utils.formatDateTime(l.timestamp)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table></div>`
+      }
+    </div>
+  `;
+
+  // Live clock
+  setInterval(() => {
+    const el = document.getElementById('live-clock');
+    if (el) el.textContent = Utils.timeNow();
+  }, 1000);
+}
+
+render();
+</script>
+</body>
+</html>

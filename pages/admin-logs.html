@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<!--
+  admin-logs.html — Activity Logs (Audit Trail)
+  Full audit trail of all system actions. Filterable by actor and action type.
+  Records include actor, action, details, IP address, and timestamp.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Activity Logs — HR Portal Admin</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+Shell.render({ type:'admin', activePage:'admin-logs.html', pageTitle:'Activity Logs' });
+
+function render() {
+  const searchActor  = (document.getElementById('s-actor')?.value  || '').toLowerCase();
+  const searchAction = (document.getElementById('s-action')?.value || '').toLowerCase();
+
+  const logs = DB.all('activity_logs')
+    .filter(l => {
+      const actorMatch  = !searchActor  || l.actor.toLowerCase().includes(searchActor);
+      const actionMatch = !searchAction || l.action.toLowerCase().includes(searchAction);
+      return actorMatch && actionMatch;
+    })
+    .sort((a,b) => b.timestamp.localeCompare(a.timestamp));
+
+  // Action type badge color
+  const actionColor = (action) => {
+    if (/LOGIN|LOGOUT/.test(action))    return 'badge-blue';
+    if (/FAILED|LOCK/.test(action))     return 'badge-red';
+    if (/ADD|INSERT|CREATE/.test(action)) return 'badge-green';
+    if (/EDIT|UPDATE|CHANGE/.test(action)) return 'badge-yellow';
+    if (/DELETE|REMOVE/.test(action))   return 'badge-red';
+    if (/CHECK_IN/.test(action))        return 'badge-green';
+    if (/CHECK_OUT/.test(action))       return 'badge-blue';
+    if (/LEAVE/.test(action))           return 'badge-yellow';
+    return 'badge-gray';
+  };
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Activity Logs</h1>
+        <div class="page-sub">Complete audit trail — ${DB.all('activity_logs').length} total records</div>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="clearLogs()">🗑 Clear Logs</button>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem;">
+      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        <div class="form-group" style="margin:0; flex:1; min-width:180px;">
+          <input type="text" id="s-actor" class="form-input" placeholder="Filter by actor…" oninput="render()" value="${Utils.sanitize(searchActor)}">
+        </div>
+        <div class="form-group" style="margin:0; flex:1; min-width:180px;">
+          <input type="text" id="s-action" class="form-input" placeholder="Filter by action…" oninput="render()" value="${Utils.sanitize(searchAction)}">
+        </div>
+        <span style="align-self:center; font-size:0.8rem; color:var(--text-muted);">${logs.length} result(s)</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>#</th><th>Actor</th><th>Action</th><th>Details</th><th>IP Address</th><th>Timestamp</th></tr>
+          </thead>
+          <tbody>
+            ${logs.length === 0
+              ? '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">No logs found</td></tr>'
+              : logs.map((l, i) => `
+                  <tr>
+                    <td class="text-mono" style="font-size:0.72rem; color:var(--text-muted);">#${l.id}</td>
+                    <td style="font-weight:500; font-size:0.85rem;">${Utils.sanitize(l.actor)}</td>
+                    <td><span class="badge ${actionColor(l.action)}" style="font-size:0.7rem;">${Utils.sanitize(l.action)}</span></td>
+                    <td style="font-size:0.82rem; color:var(--text-secondary);">${Utils.sanitize(l.details)}</td>
+                    <td class="text-mono" style="font-size:0.75rem; color:var(--text-muted);">${Utils.sanitize(l.ip_address)}</td>
+                    <td style="font-size:0.75rem; color:var(--text-muted); white-space:nowrap;">${Utils.formatDateTime(l.timestamp)}</td>
+                  </tr>
+                `).join('')
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function clearLogs() {
+  if (!confirm('Are you sure you want to clear all activity logs? This cannot be undone.')) return;
+  const admin = Auth.getSession();
+  localStorage.removeItem('hr_activity_logs');
+  DB.log(admin.fullName, 'LOGS_CLEARED', 'Administrator cleared all activity logs.');
+  Utils.toast('Logs cleared.', 'warning');
+  render();
+}
+
+render();
+</script>
+</body>
+</html>

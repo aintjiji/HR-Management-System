@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<!--
+  employee-attendance.html — Attendance Check In/Out
+  Employees check in and out with optional geofence validation.
+  Logs all actions to activity_logs with timestamps.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance — HR Portal</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <style>
+    .att-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .geo-status { padding: 0.75rem 1rem; border-radius: var(--radius-sm); font-size: 0.82rem; margin-bottom: 1rem; }
+    .geo-ok      { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,201,167,0.3); }
+    .geo-fail    { background: var(--danger-dim);  color: var(--danger);  border: 1px solid rgba(248,81,73,0.3); }
+    .geo-unknown { background: var(--bg-hover); color: var(--text-muted); border: 1px solid var(--border); }
+    @media(max-width:700px){ .att-grid{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+const session = Shell.render({ type:'employee', activePage:'employee-attendance.html', pageTitle:'Attendance' });
+
+let userLat = null, userLng = null, geoStatus = 'unknown';
+
+function render() {
+  const today = Utils.todayISO();
+  const settings = Utils.getSettings();
+  const emp = DB.find('employees', e => e.id === session.employeeId);
+
+  // All attendance records for this employee
+  const records = DB.filter('attendance', a => a.employee_id === session.employeeId)
+    .sort((a,b) => b.date.localeCompare(a.date))
+    .slice(0, 30);
+
+  const todayAtt = records.find(r => r.date === today);
+
+  const canCheckIn  = !todayAtt;
+  const canCheckOut = todayAtt && todayAtt.check_in && !todayAtt.check_out;
+
+  const geoHTML = `
+    <div class="geo-status geo-${geoStatus}" id="geo-status-box">
+      ${geoStatus === 'ok'
+        ? '✓ Location verified — within office geofence'
+        : geoStatus === 'fail'
+        ? '✕ Outside office geofence — attendance may be flagged'
+        : '◌ Location not yet verified — click to get location'}
+    </div>`;
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Attendance</h1>
+        <div class="page-sub">Check in and out · Today: ${Utils.sanitize(Utils.todayLabel())}</div>
+      </div>
+    </div>
+
+    <div class="att-grid">
+
+      <!-- Clock & Check-in/out -->
+      <div>
+        <div class="clock-card" style="margin-bottom:1rem;">
+          <div class="clock-time" id="live-clock">${Utils.timeNow()}</div>
+          <div class="clock-date">${Utils.sanitize(Utils.todayLabel())}</div>
+          ${todayAtt && todayAtt.check_out
+            ? `<div class="attendance-status status-checked-out"><span class="status-dot"></span> Checked Out ${Utils.formatTime(todayAtt.check_out)}</div>`
+            : todayAtt && todayAtt.check_in
+            ? `<div class="attendance-status status-checked-in"><span class="status-dot"></span> Checked In ${Utils.formatTime(todayAtt.check_in)}</div>`
+            : `<div class="attendance-status status-not-in"><span class="status-dot"></span> Not Checked In</div>`
+          }
+        </div>
+
+        <div class="card">
+          <div class="card-title" style="margin-bottom:1rem;">📍 Geofence Verification</div>
+          ${geoHTML}
+          <button class="btn btn-secondary btn-full" style="margin-bottom:1rem;" onclick="getLocation()">
+            📡 Get My Location
+          </button>
+
+          ${canCheckIn
+            ? `<button class="btn btn-primary btn-full" onclick="checkIn()">⬆ Check In Now</button>`
+            : canCheckOut
+            ? `<button class="btn btn-warning btn-full" onclick="checkOut()">⬇ Check Out Now</button>`
+            : `<div class="alert alert-success">✓ Attendance complete for today</div>`
+          }
+
+          ${todayAtt ? `
+            <div style="margin-top:1rem; padding:0.85rem; background:var(--bg-hover); border-radius:var(--radius-sm); font-size:0.82rem;">
+              <div class="flex justify-between"><span class="text-muted">Check In</span> <span>${Utils.formatTime(todayAtt.check_in)}</span></div>
+              <div class="flex justify-between mt-1"><span class="text-muted">Check Out</span> <span>${Utils.formatTime(todayAtt.check_out) || '—'}</span></div>
+              <div class="flex justify-between mt-1"><span class="text-muted">Hours</span> <span>${todayAtt.check_out ? Utils.hoursBetween(todayAtt.check_in, todayAtt.check_out) + ' hrs' : '—'}</span></div>
+              <div class="flex justify-between mt-1"><span class="text-muted">Status</span> <span>${Utils.statusBadge(todayAtt.status)}</span></div>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+
+      <!-- Attendance History -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">History (Last 30 Days)</span>
+        </div>
+        ${records.length === 0
+          ? '<div class="empty-state"><div class="empty-icon">📅</div><p>No attendance records yet</p></div>'
+          : `<div class="table-wrap"><table>
+              <thead><tr><th>Date</th><th>In</th><th>Out</th><th>Hrs</th><th>Status</th></tr></thead>
+              <tbody>
+                ${records.map(r => `<tr>
+                  <td class="text-mono" style="font-size:0.8rem;">${Utils.sanitize(r.date)}</td>
+                  <td style="font-size:0.8rem;">${Utils.formatTime(r.check_in)}</td>
+                  <td style="font-size:0.8rem;">${r.check_out ? Utils.formatTime(r.check_out) : '—'}</td>
+                  <td style="font-size:0.8rem;">${r.check_out ? Utils.hoursBetween(r.check_in, r.check_out) : '—'}</td>
+                  <td>${Utils.statusBadge(r.status)}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table></div>`
+        }
+      </div>
+    </div>
+  `;
+
+  setInterval(() => {
+    const el = document.getElementById('live-clock');
+    if (el) el.textContent = Utils.timeNow();
+  }, 1000);
+}
+
+function getLocation() {
+  if (!navigator.geolocation) {
+    Utils.toast('Geolocation not supported by your browser.', 'warning');
+    return;
+  }
+  Utils.toast('Getting your location…', 'info');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      userLat = pos.coords.latitude;
+      userLng = pos.coords.longitude;
+      const settings = Utils.getSettings();
+      const within = Utils.isWithinGeofence(userLat, userLng, settings.office_lat, settings.office_lng, settings.geofence_radius_meters);
+      geoStatus = within ? 'ok' : 'fail';
+      const box = document.getElementById('geo-status-box');
+      if (box) {
+        box.className = `geo-status geo-${geoStatus}`;
+        box.textContent = within
+          ? '✓ Location verified — within office geofence'
+          : `✕ Outside geofence (${Math.round(Utils.haversineDistance(userLat, userLng, settings.office_lat, settings.office_lng))}m away)`;
+      }
+      Utils.toast(within ? 'Location verified!' : 'Outside geofence — attendance will be flagged.', within ? 'success' : 'warning');
+    },
+    () => {
+      geoStatus = 'fail';
+      Utils.toast('Could not get location. Proceeding without verification.', 'warning');
+      render();
+    }
+  );
+}
+
+function checkIn() {
+  const settings = Utils.getSettings();
+  const now = new Date();
+  const todayISO = Utils.todayISO();
+  const [h, m] = settings.workday_start.split(':').map(Number);
+  const workStart = new Date(now);
+  workStart.setHours(h, m + settings.late_threshold_minutes, 0, 0);
+  const isLate = now > workStart;
+  const status = geoStatus === 'fail' ? 'flagged' : (isLate ? 'late' : 'present');
+
+  DB.insert('attendance', {
+    employee_id: session.employeeId,
+    date: todayISO,
+    check_in: new Date().toISOString(),
+    check_out: null,
+    status,
+    geo_verified: geoStatus === 'ok',
+    lat: userLat,
+    lng: userLng,
+  });
+
+  DB.log(session.fullName, 'CHECK_IN', `Status: ${status}. Geo: ${geoStatus}.`);
+  Utils.toast(`Checked in successfully! Status: ${status}`, 'success');
+  render();
+}
+
+function checkOut() {
+  const today = Utils.todayISO();
+  const record = DB.find('attendance', a => a.employee_id === session.employeeId && a.date === today);
+  if (!record) return;
+
+  DB.update('attendance', record.id, {
+    check_out: new Date().toISOString(),
+  });
+
+  const updated = DB.find('attendance', a => a.id === record.id);
+  const hours = Utils.hoursBetween(updated.check_in, updated.check_out);
+  DB.log(session.fullName, 'CHECK_OUT', `Hours worked: ${hours}`);
+  Utils.toast(`Checked out. Hours worked: ${hours}`, 'success');
+  render();
+}
+
+render();
+</script>
+</body>
+</html>

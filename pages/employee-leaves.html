@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<!--
+  employee-leaves.html — Leave Request Management
+  Employees apply for casual/sick leave and track request status.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leave Requests — HR Portal</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+
+<!-- Apply Leave Modal -->
+<div class="modal" id="leave-modal">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">Apply for Leave</span>
+      <button class="modal-close" onclick="Utils.closeModal('leave-modal')">✕</button>
+    </div>
+
+    <div id="modal-error" class="alert alert-error" style="display:none">
+      <span>⚠</span><span id="modal-error-msg"></span>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Leave Type</label>
+      <select id="leave-type" class="form-select">
+        <option value="casual">Casual Leave</option>
+        <option value="sick">Sick Leave</option>
+        <option value="emergency">Emergency Leave</option>
+      </select>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Start Date</label>
+        <input type="date" id="leave-start" class="form-input">
+      </div>
+      <div class="form-group">
+        <label class="form-label">End Date</label>
+        <input type="date" id="leave-end" class="form-input">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Reason</label>
+      <textarea id="leave-reason" class="form-textarea" placeholder="Briefly explain your reason for leave…"></textarea>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Utils.closeModal('leave-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitLeave()">Submit Request</button>
+    </div>
+  </div>
+</div>
+
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+const session = Shell.render({ type:'employee', activePage:'employee-leaves.html', pageTitle:'Leave Requests' });
+
+// Pre-fill date inputs to today
+document.getElementById('leave-start').value = Utils.todayISO();
+document.getElementById('leave-end').value   = Utils.todayISO();
+
+function render() {
+  const settings = Utils.getSettings();
+  const leaves = DB.filter('leave_requests', l => l.employee_id === session.employeeId)
+    .sort((a,b) => b.created_at.localeCompare(a.created_at));
+
+  const usedCasual = leaves.filter(l => l.status === 'approved' && l.type === 'casual').length;
+  const usedSick   = leaves.filter(l => l.status === 'approved' && l.type === 'sick').length;
+  const pending    = leaves.filter(l => l.status === 'pending').length;
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Leave Requests</h1>
+        <div class="page-sub">Apply and track your leave applications</div>
+      </div>
+      <button class="btn btn-primary" onclick="Utils.openModal('leave-modal')">+ Apply for Leave</button>
+    </div>
+
+    <div class="stats-grid" style="margin-bottom:1.5rem;">
+      <div class="stat-card info">
+        <div class="stat-label">Casual Leave</div>
+        <div class="stat-value">${settings.casual_leave_days - usedCasual}</div>
+        <div class="stat-sub">of ${settings.casual_leave_days} remaining</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="stat-label">Sick Leave</div>
+        <div class="stat-value">${settings.sick_leave_days - usedSick}</div>
+        <div class="stat-sub">of ${settings.sick_leave_days} remaining</div>
+      </div>
+      <div class="stat-card ${pending > 0 ? 'warning' : ''}">
+        <div class="stat-label">Pending</div>
+        <div class="stat-value">${pending}</div>
+        <div class="stat-sub">awaiting admin approval</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">All Requests</span>
+      </div>
+      ${leaves.length === 0
+        ? '<div class="empty-state"><div class="empty-icon">🏖️</div><p>No leave requests yet. Click "Apply for Leave" to submit one.</p></div>'
+        : `<div class="table-wrap"><table>
+            <thead><tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th><th>Applied</th></tr></thead>
+            <tbody>
+              ${leaves.map(l => {
+                const days = Math.ceil((new Date(l.end_date) - new Date(l.start_date)) / 86400000) + 1;
+                return `<tr>
+                  <td><span class="badge badge-blue">${Utils.sanitize(l.type)}</span></td>
+                  <td class="text-mono" style="font-size:0.8rem;">${Utils.sanitize(l.start_date)}</td>
+                  <td class="text-mono" style="font-size:0.8rem;">${Utils.sanitize(l.end_date)}</td>
+                  <td>${days}</td>
+                  <td style="font-size:0.82rem; max-width:200px;">${Utils.sanitize(l.reason.substring(0, 60))}${l.reason.length > 60 ? '…' : ''}</td>
+                  <td>${Utils.statusBadge(l.status)}</td>
+                  <td style="font-size:0.78rem; color:var(--text-muted);">${Utils.formatDate(l.created_at)}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table></div>`
+      }
+    </div>
+  `;
+}
+
+function submitLeave() {
+  const type      = document.getElementById('leave-type').value;
+  const startDate = document.getElementById('leave-start').value;
+  const endDate   = document.getElementById('leave-end').value;
+  const reason    = Utils.stripTags(document.getElementById('leave-reason').value.trim());
+
+  const errors = Utils.validateForm([
+    { name: 'Start Date', value: startDate, rules: ['required'] },
+    { name: 'End Date',   value: endDate,   rules: ['required'] },
+    { name: 'Reason',     value: reason,    rules: ['required', { minLength: 10 }] },
+  ]);
+
+  if (new Date(endDate) < new Date(startDate)) errors.push('End date cannot be before start date.');
+
+  if (errors.length > 0) {
+    document.getElementById('modal-error').style.display = 'flex';
+    document.getElementById('modal-error-msg').textContent = errors[0];
+    return;
+  }
+
+  document.getElementById('modal-error').style.display = 'none';
+
+  DB.insert('leave_requests', {
+    employee_id: session.employeeId,
+    type,
+    start_date: startDate,
+    end_date:   endDate,
+    reason,
+    status: 'pending',
+  });
+
+  DB.log(session.fullName, 'LEAVE_REQUEST', `${type} leave: ${startDate} to ${endDate}`);
+  Utils.closeModal('leave-modal');
+  Utils.toast('Leave request submitted!', 'success');
+  render();
+}
+
+render();
+</script>
+</body>
+</html>

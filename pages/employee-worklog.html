@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<!--
+  employee-worklog.html — Hourly Work Log
+  Employees log their tasks and progress throughout the workday.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Work Log — HR Portal</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+const session = Shell.render({ type:'employee', activePage:'employee-worklog.html', pageTitle:'Work Log' });
+
+function render() {
+  const today = Utils.todayISO();
+  const todayLogs = DB.filter('employee_hourly_notes',
+    n => n.employee_id === session.employeeId && n.date === today
+  ).sort((a,b) => a.created_at.localeCompare(b.created_at));
+
+  const checkedIn = DB.find('attendance', a => a.employee_id === session.employeeId && a.date === today && a.check_in);
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Work Log</h1>
+        <div class="page-sub">Log your tasks throughout the day — ${Utils.sanitize(Utils.todayLabel())}</div>
+      </div>
+    </div>
+
+    ${!checkedIn
+      ? `<div class="alert alert-warning">⚠ You haven't checked in today. <a href="employee-attendance.html">Check in first</a> before logging work.</div>`
+      : ''
+    }
+
+    <!-- Add Entry Form -->
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="card-title" style="margin-bottom:1rem;">Add Work Entry</div>
+      <div class="form-group">
+        <label class="form-label">Time Slot</label>
+        <select id="time-slot" class="form-select">
+          ${['08:00–09:00','09:00–10:00','10:00–11:00','11:00–12:00',
+             '13:00–14:00','14:00–15:00','15:00–16:00','16:00–17:00'].map(t =>
+            `<option value="${t}">${t}</option>`
+          ).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Task Description</label>
+        <textarea id="task-desc" class="form-textarea" rows="3"
+          placeholder="Describe what you worked on during this time slot…"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="addEntry()" ${!checkedIn ? 'disabled' : ''}>
+        + Add Entry
+      </button>
+    </div>
+
+    <!-- Today's Log -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Today's Entries (${todayLogs.length})</span>
+      </div>
+      ${todayLogs.length === 0
+        ? '<div class="empty-state"><div class="empty-icon">📝</div><p>No entries yet today</p></div>'
+        : `<div style="display:flex; flex-direction:column; gap:0.75rem;">
+            ${todayLogs.map(entry => `
+              <div style="display:flex; gap:1rem; padding:0.85rem; background:var(--bg-hover); border-radius:var(--radius-sm); border:1px solid var(--border); align-items:flex-start;">
+                <div style="background:var(--accent-dim); color:var(--accent); border:1px solid rgba(0,201,167,0.3); border-radius:var(--radius-sm); padding:0.3rem 0.6rem; font-size:0.75rem; font-family:var(--font-mono); white-space:nowrap;">${Utils.sanitize(entry.time_slot)}</div>
+                <div style="flex:1;">
+                  <div style="font-size:0.875rem;">${Utils.sanitize(entry.description)}</div>
+                  <div style="font-size:0.72rem; color:var(--text-muted); margin-top:4px;">Logged at ${Utils.formatTime(entry.created_at)}</div>
+                </div>
+                <button class="btn btn-danger btn-sm" onclick="deleteEntry(${entry.id})">✕</button>
+              </div>
+            `).join('')}
+          </div>`
+      }
+    </div>
+  `;
+}
+
+function addEntry() {
+  const slot = document.getElementById('time-slot').value;
+  const desc = Utils.stripTags(document.getElementById('task-desc').value.trim());
+
+  if (!desc || desc.length < 5) {
+    Utils.toast('Please enter a task description (min 5 characters).', 'error');
+    return;
+  }
+
+  DB.insert('employee_hourly_notes', {
+    employee_id: session.employeeId,
+    date: Utils.todayISO(),
+    time_slot: slot,
+    description: desc,
+  });
+
+  DB.log(session.fullName, 'WORK_LOG', `Entry for ${slot}: ${desc.substring(0, 50)}`);
+  document.getElementById('task-desc').value = '';
+  Utils.toast('Work entry added!', 'success');
+  render();
+}
+
+function deleteEntry(id) {
+  DB.remove('employee_hourly_notes', id);
+  DB.log(session.fullName, 'WORK_LOG_DELETE', `Deleted entry #${id}`);
+  Utils.toast('Entry removed.', 'info');
+  render();
+}
+
+render();
+</script>
+</body>
+</html>

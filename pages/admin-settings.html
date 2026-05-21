@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<!--
+  admin-settings.html — System Settings
+  Configure workday hours, late thresholds, leave allocations,
+  geofence location and radius, and office details.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — HR Portal Admin</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+Shell.render({ type: 'admin', activePage: 'admin-settings.html', pageTitle: 'System Settings' });
+
+function render() {
+  const s = Utils.getSettings();
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">System Settings</h1>
+        <div class="page-sub">Configure global HR portal behaviour</div>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:1rem;">
+
+      <!-- Workday Settings -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:1.25rem;">⏰ Workday Configuration</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Workday Start</label>
+            <input type="time" id="s-start" class="form-input" value="${Utils.sanitize(s.workday_start)}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Workday End</label>
+            <input type="time" id="s-end" class="form-input" value="${Utils.sanitize(s.workday_end)}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Late Threshold (minutes)</label>
+            <input type="number" id="s-late" class="form-input" value="${s.late_threshold_minutes}" min="1" max="120">
+            <div class="form-hint">Arrivals past start + this value are marked Late</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Leave Allocations -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:1.25rem;">🏖️ Leave Allocations (per year)</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Casual Leave Days</label>
+            <input type="number" id="s-casual" class="form-input" value="${s.casual_leave_days}" min="0" max="365">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Sick Leave Days</label>
+            <input type="number" id="s-sick" class="form-input" value="${s.sick_leave_days}" min="0" max="365">
+          </div>
+        </div>
+      </div>
+
+      <!-- Geofence Settings -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:0.5rem;">📍 Geofence Configuration</div>
+        <p style="font-size:0.82rem; margin-bottom:1.25rem;">Set the office coordinates and allowed radius for attendance validation.</p>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Office Name</label>
+            <input type="text" id="s-office-name" class="form-input" value="${Utils.sanitize(s.office_name)}">
+          </div>
+          <div></div>
+          <div class="form-group">
+            <label class="form-label">Latitude</label>
+            <input type="number" step="0.0001" id="s-lat" class="form-input" value="${s.office_lat}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Longitude</label>
+            <input type="number" step="0.0001" id="s-lng" class="form-input" value="${s.office_lng}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Geofence Radius (meters)</label>
+            <input type="number" id="s-radius" class="form-input" value="${s.geofence_radius_meters}" min="50" max="5000">
+            <div class="form-hint">Employees outside this radius will be flagged</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data Management -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:1rem;">🗄️ Data Management</div>
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+          <button class="btn btn-secondary" onclick="exportCSV()">⬇ Export Attendance CSV</button>
+          <button class="btn btn-danger" onclick="resetData()">⚠ Reset All Data</button>
+        </div>
+        <p style="font-size:0.78rem; color:var(--text-muted); margin-top:0.75rem;">
+          Reset will delete all attendance records, leave requests, and logs. Employees and settings are preserved.
+        </p>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end;">
+        <button class="btn btn-primary" onclick="saveSettings()">💾 Save All Settings</button>
+      </div>
+    </div>
+  `;
+}
+
+function saveSettings() {
+  const settings = Utils.getSettings();
+  const updated = {
+    workday_start:           document.getElementById('s-start').value,
+    workday_end:             document.getElementById('s-end').value,
+    late_threshold_minutes:  parseInt(document.getElementById('s-late').value),
+    casual_leave_days:       parseInt(document.getElementById('s-casual').value),
+    sick_leave_days:         parseInt(document.getElementById('s-sick').value),
+    office_name:             Utils.stripTags(document.getElementById('s-office-name').value.trim()),
+    office_lat:              parseFloat(document.getElementById('s-lat').value),
+    office_lng:              parseFloat(document.getElementById('s-lng').value),
+    geofence_radius_meters:  parseInt(document.getElementById('s-radius').value),
+  };
+
+  if (isNaN(updated.late_threshold_minutes) || updated.late_threshold_minutes < 1) {
+    Utils.toast('Late threshold must be a positive number.', 'error'); return;
+  }
+
+  DB.update('system_settings', settings.id, updated);
+  const admin = Auth.getSession();
+  DB.log(admin.fullName, 'SETTINGS_UPDATE', 'System settings updated.');
+  Utils.toast('Settings saved successfully!', 'success');
+}
+
+function exportCSV() {
+  const records   = DB.all('attendance');
+  const employees = DB.all('employees');
+  const header = ['emp_code', 'full_name', 'department', 'date', 'check_in', 'check_out', 'hours', 'status', 'geo_verified'];
+  const rows = records.map(r => {
+    const emp   = employees.find(e => e.id === r.employee_id);
+    const hours = r.check_in && r.check_out ? Utils.hoursBetween(r.check_in, r.check_out) : '';
+    return [
+      emp?.emp_code || '', emp?.full_name || '',
+      Utils.getDepartmentName(emp?.department_id),
+      r.date, r.check_in ? new Date(r.check_in).toLocaleTimeString('en-PH') : '',
+      r.check_out ? new Date(r.check_out).toLocaleTimeString('en-PH') : '',
+      hours, r.status, r.geo_verified ? 'yes' : 'no',
+    ];
+  });
+
+  const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `attendance_export_${Utils.todayISO()}.csv`;
+  a.click();
+
+  const admin = Auth.getSession();
+  DB.log(admin.fullName, 'DATA_EXPORT', 'Exported attendance records to CSV.');
+  Utils.toast('CSV exported!', 'success');
+}
+
+function resetData() {
+  if (!confirm('⚠ This will delete ALL attendance, leave requests, work logs, and activity logs. Are you absolutely sure?')) return;
+  if (!confirm('Second confirmation: this action CANNOT be undone. Proceed?')) return;
+
+  ['attendance', 'leave_requests', 'employee_hourly_notes', 'activity_logs'].forEach(t => {
+    localStorage.removeItem('hr_' + t);
+  });
+
+  const admin = Auth.getSession();
+  DB.log(admin.fullName, 'DATA_RESET', 'All transactional data was reset by administrator.');
+  Utils.toast('Data reset complete.', 'warning');
+}
+
+render();
+</script>
+</body>
+</html>

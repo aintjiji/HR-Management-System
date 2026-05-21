@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<!--
+  admin-attendance.html — Attendance Management
+  View, filter, and manually override daily attendance records.
+  Admins can correct check-in/out times and flag anomalies.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance — HR Portal Admin</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+
+<!-- Edit Attendance Modal -->
+<div class="modal" id="att-modal">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">Override Attendance Record</span>
+      <button class="modal-close" onclick="Utils.closeModal('att-modal')">✕</button>
+    </div>
+    <div class="alert alert-warning" style="margin-bottom:1rem;">
+      <span>⚠</span><span>Manual overrides are logged in the audit trail.</span>
+    </div>
+    <input type="hidden" id="edit-att-id">
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Check-In Time</label>
+        <input type="datetime-local" id="edit-checkin" class="form-input">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Check-Out Time</label>
+        <input type="datetime-local" id="edit-checkout" class="form-input">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Status Override</label>
+      <select id="edit-status" class="form-select">
+        <option value="present">Present</option>
+        <option value="late">Late</option>
+        <option value="absent">Absent</option>
+        <option value="flagged">Flagged</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Reason / Admin Note</label>
+      <textarea id="edit-note" class="form-textarea" rows="2" placeholder="Reason for manual override…"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Utils.closeModal('att-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveOverride()">Save Override</button>
+    </div>
+  </div>
+</div>
+
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+Shell.render({ type: 'admin', activePage: 'admin-attendance.html', pageTitle: 'Attendance Management' });
+
+function render() {
+  const filterDate = document.getElementById('f-date')?.value || Utils.todayISO();
+  const filterEmp  = (document.getElementById('f-emp')?.value || '').toLowerCase();
+
+  const employees = DB.filter('employees', e => e.status === 'active');
+  const records   = DB.filter('attendance', a => a.date === filterDate);
+
+  // Build a combined list: every active employee + their record (or absent)
+  const rows = employees
+    .filter(e => !filterEmp || e.full_name.toLowerCase().includes(filterEmp) || e.emp_code.toLowerCase().includes(filterEmp))
+    .map(emp => ({
+      emp,
+      record: records.find(r => r.employee_id === emp.id) || null,
+    }));
+
+  const present = rows.filter(r => r.record && (r.record.status === 'present' || r.record.status === 'late')).length;
+  const absent  = rows.filter(r => !r.record).length;
+  const late    = rows.filter(r => r.record && r.record.status === 'late').length;
+  const flagged = rows.filter(r => r.record && r.record.status === 'flagged').length;
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Attendance</h1>
+        <div class="page-sub">Daily records with manual override capability</div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid" style="margin-bottom:1.25rem;">
+      <div class="stat-card accent">
+        <div class="stat-label">Present</div>
+        <div class="stat-value">${present}</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-label">Absent</div>
+        <div class="stat-value">${absent}</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="stat-label">Late</div>
+        <div class="stat-value">${late}</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-label">Flagged</div>
+        <div class="stat-value">${flagged}</div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card" style="margin-bottom:1rem;">
+      <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+        <div class="form-group" style="margin:0; flex:1; min-width:160px;">
+          <label class="form-label">Date</label>
+          <input type="date" id="f-date" class="form-input" value="${filterDate}" oninput="render()">
+        </div>
+        <div class="form-group" style="margin:0; flex:2; min-width:200px;">
+          <label class="form-label">Search Employee</label>
+          <input type="text" id="f-emp" class="form-input" placeholder="Name or code…" oninput="render()" value="${Utils.sanitize(filterEmp)}">
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Employee</th><th>Dept</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th><th>Geo</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            ${rows.map(({ emp, record }) => `
+              <tr>
+                <td>
+                  <div style="font-weight:500; font-size:0.85rem;">${Utils.sanitize(emp.full_name)}</div>
+                  <div style="font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono);">${Utils.sanitize(emp.emp_code)}</div>
+                </td>
+                <td style="font-size:0.82rem;">${Utils.sanitize(Utils.getDepartmentName(emp.department_id))}</td>
+                <td class="text-mono" style="font-size:0.8rem;">${record?.check_in ? Utils.formatTime(record.check_in) : '<span style="color:var(--text-muted)">—</span>'}</td>
+                <td class="text-mono" style="font-size:0.8rem;">${record?.check_out ? Utils.formatTime(record.check_out) : '<span style="color:var(--text-muted)">—</span>'}</td>
+                <td style="font-size:0.82rem;">${record?.check_in && record?.check_out ? Utils.hoursBetween(record.check_in, record.check_out) + 'h' : '—'}</td>
+                <td>${record ? Utils.statusBadge(record.status) : Utils.statusBadge('absent')}</td>
+                <td style="font-size:0.8rem;">
+                  ${record ? (record.geo_verified
+                    ? '<span style="color:var(--accent)">✓</span>'
+                    : '<span style="color:var(--warning)">!</span>')
+                    : '<span style="color:var(--text-muted)">—</span>'
+                  }
+                </td>
+                <td>
+                  <button class="btn btn-secondary btn-sm" onclick="openOverride(${emp.id}, '${filterDate}')">
+                    Override
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function openOverride(empId, date) {
+  const record = DB.find('attendance', a => a.employee_id === empId && a.date === date);
+  document.getElementById('edit-att-id').value  = record?.id || '';
+  document.getElementById('edit-checkin').value  = record?.check_in  ? record.check_in.slice(0,16)  : '';
+  document.getElementById('edit-checkout').value = record?.check_out ? record.check_out.slice(0,16) : '';
+  document.getElementById('edit-status').value   = record?.status || 'present';
+  document.getElementById('edit-note').value     = '';
+  document.getElementById('edit-att-id').dataset.empId = empId;
+  document.getElementById('edit-att-id').dataset.date  = date;
+  Utils.openModal('att-modal');
+}
+
+function saveOverride() {
+  const attId    = document.getElementById('edit-att-id').value;
+  const empId    = parseInt(document.getElementById('edit-att-id').dataset.empId);
+  const date     = document.getElementById('edit-att-id').dataset.date;
+  const checkIn  = document.getElementById('edit-checkin').value;
+  const checkOut = document.getElementById('edit-checkout').value;
+  const status   = document.getElementById('edit-status').value;
+  const note     = Utils.stripTags(document.getElementById('edit-note').value.trim());
+  const admin    = Auth.getSession();
+  const emp      = DB.find('employees', e => e.id === empId);
+
+  const data = {
+    employee_id: empId,
+    date,
+    check_in:  checkIn  ? new Date(checkIn).toISOString()  : null,
+    check_out: checkOut ? new Date(checkOut).toISOString() : null,
+    status,
+    geo_verified: false,
+    admin_override: true,
+    override_note: note,
+  };
+
+  if (attId) {
+    DB.update('attendance', parseInt(attId), data);
+  } else {
+    DB.insert('attendance', data);
+  }
+
+  DB.log(admin.fullName, 'ATTENDANCE_OVERRIDE', `${emp?.emp_code} on ${date} → ${status}. Note: ${note}`);
+  Utils.closeModal('att-modal');
+  Utils.toast('Attendance record updated.', 'success');
+  render();
+}
+
+render();
+</script>
+</body>
+</html>

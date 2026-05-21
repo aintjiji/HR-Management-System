@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<!--
+  admin-employees.html — Employee Management
+  Add, edit, deactivate employees. Assign departments/roles.
+  Manage portal access credentials.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Employees — HR Portal Admin</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+
+<!-- Add/Edit Employee Modal -->
+<div class="modal" id="emp-modal">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box modal-lg">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Add Employee</span>
+      <button class="modal-close" onclick="Utils.closeModal('emp-modal')">✕</button>
+    </div>
+    <div id="modal-error" class="alert alert-error" style="display:none"><span>⚠</span><span id="modal-error-msg"></span></div>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Full Name *</label>
+        <input type="text" id="f-name" class="form-input" placeholder="First Last">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Employee Code *</label>
+        <input type="text" id="f-code" class="form-input" placeholder="EMP004">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email *</label>
+        <input type="email" id="f-email" class="form-input">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Phone *</label>
+        <input type="text" id="f-phone" class="form-input" placeholder="09XXXXXXXXX">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Department *</label>
+        <select id="f-dept" class="form-select"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Role *</label>
+        <select id="f-role" class="form-select"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Hire Date *</label>
+        <input type="date" id="f-hire" class="form-input" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select id="f-status" class="form-select">
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Emergency Contact</label>
+      <input type="text" id="f-emergency" class="form-input" placeholder="Name — Phone Number">
+    </div>
+
+    <hr class="divider">
+    <div class="card-title" style="margin-bottom:0.75rem; font-size:0.9rem;">Portal Login Credentials</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Username *</label>
+        <input type="text" id="f-username" class="form-input" placeholder="lowercase, no spaces" spellcheck="false">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password *</label>
+        <input type="password" id="f-password" class="form-input" placeholder="Min. 8 characters">
+        <div class="form-hint" id="pw-hint">Leave blank to keep existing password (when editing).</div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Utils.closeModal('emp-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEmployee()" id="save-btn">Save Employee</button>
+    </div>
+  </div>
+</div>
+
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+Shell.render({ type:'admin', activePage:'admin-employees.html', pageTitle:'Employees' });
+
+let editingId = null;
+
+// Populate department/role selects
+function populateSelects() {
+  const depts = DB.all('departments');
+  const roles = DB.all('roles');
+  ['f-dept'].forEach(id => {
+    document.getElementById(id).innerHTML = depts.map(d => `<option value="${d.id}">${Utils.sanitize(d.name)}</option>`).join('');
+  });
+  document.getElementById('f-role').innerHTML = roles.map(r => `<option value="${r.id}">${Utils.sanitize(r.name)}</option>`).join('');
+}
+
+function render() {
+  const employees = DB.all('employees');
+  const search = (document.getElementById('search-val')?.value || '').toLowerCase();
+  const filtered = search
+    ? employees.filter(e => e.full_name.toLowerCase().includes(search) || e.emp_code.toLowerCase().includes(search))
+    : employees;
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Employees</h1>
+        <div class="page-sub">${employees.length} total · ${employees.filter(e=>e.status==='active').length} active</div>
+      </div>
+      <button class="btn btn-primary" onclick="openAdd()">+ Add Employee</button>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <input type="text" id="search-val" class="form-input" style="max-width:280px;"
+          placeholder="Search by name or code…" oninput="render()" value="${Utils.sanitize(search)}">
+        <span class="text-muted" style="font-size:0.82rem;">${filtered.length} result(s)</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Code</th><th>Name</th><th>Department</th><th>Role</th><th>Email</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            ${filtered.length === 0
+              ? '<tr><td colspan="7" class="text-center text-muted" style="padding:2rem;">No employees found</td></tr>'
+              : filtered.map(emp => `
+                  <tr>
+                    <td class="text-mono" style="font-size:0.78rem;">${Utils.sanitize(emp.emp_code)}</td>
+                    <td style="font-weight:500;">${Utils.sanitize(emp.full_name)}</td>
+                    <td style="font-size:0.82rem;">${Utils.sanitize(Utils.getDepartmentName(emp.department_id))}</td>
+                    <td style="font-size:0.82rem;">${Utils.sanitize(Utils.getRoleName(emp.role_id))}</td>
+                    <td style="font-size:0.8rem;">${Utils.sanitize(emp.email)}</td>
+                    <td>${Utils.statusBadge(emp.status)}</td>
+                    <td>
+                      <button class="btn btn-secondary btn-sm" onclick="openEdit(${emp.id})">Edit</button>
+                      <button class="btn btn-danger btn-sm" onclick="toggleStatus(${emp.id}, '${emp.status}')">
+                        ${emp.status === 'active' ? 'Deactivate' : 'Activate'}
+                      </button>
+                    </td>
+                  </tr>
+                `).join('')
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function openAdd() {
+  editingId = null;
+  document.getElementById('modal-title').textContent = 'Add Employee';
+  document.getElementById('modal-error').style.display = 'none';
+  document.getElementById('pw-hint').style.display = 'none';
+  ['f-name','f-code','f-email','f-phone','f-emergency','f-username','f-password'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('f-hire').value = new Date().toISOString().split('T')[0];
+  document.getElementById('f-status').value = 'active';
+  populateSelects();
+  Utils.openModal('emp-modal');
+}
+
+function openEdit(id) {
+  const emp = DB.find('employees', e => e.id === id);
+  const user = DB.find('users', u => u.employee_id === id);
+  editingId = id;
+  document.getElementById('modal-title').textContent = 'Edit Employee';
+  document.getElementById('modal-error').style.display = 'none';
+  document.getElementById('pw-hint').style.display = 'block';
+
+  populateSelects();
+  document.getElementById('f-name').value      = emp.full_name;
+  document.getElementById('f-code').value      = emp.emp_code;
+  document.getElementById('f-email').value     = emp.email;
+  document.getElementById('f-phone').value     = emp.phone || '';
+  document.getElementById('f-emergency').value = emp.emergency_contact || '';
+  document.getElementById('f-hire').value      = emp.hire_date;
+  document.getElementById('f-status').value    = emp.status;
+  document.getElementById('f-dept').value      = emp.department_id;
+  document.getElementById('f-role').value      = emp.role_id;
+  document.getElementById('f-username').value  = user?.username || '';
+  document.getElementById('f-password').value  = '';
+  Utils.openModal('emp-modal');
+}
+
+function saveEmployee() {
+  document.getElementById('modal-error').style.display = 'none';
+  const showErr = (msg) => {
+    document.getElementById('modal-error').style.display = 'flex';
+    document.getElementById('modal-error-msg').textContent = msg;
+  };
+
+  const name      = Utils.stripTags(document.getElementById('f-name').value.trim());
+  const code      = Utils.stripTags(document.getElementById('f-code').value.trim().toUpperCase());
+  const email     = document.getElementById('f-email').value.trim();
+  const phone     = document.getElementById('f-phone').value.trim();
+  const deptId    = parseInt(document.getElementById('f-dept').value);
+  const roleId    = parseInt(document.getElementById('f-role').value);
+  const hireDate  = document.getElementById('f-hire').value;
+  const status    = document.getElementById('f-status').value;
+  const emergency = Utils.stripTags(document.getElementById('f-emergency').value.trim());
+  const username  = document.getElementById('f-username').value.trim().toLowerCase();
+  const password  = document.getElementById('f-password').value;
+
+  const errors = Utils.validateForm([
+    { name:'Full Name', value:name, rules:['required'] },
+    { name:'Emp Code',  value:code, rules:['required'] },
+    { name:'Email',     value:email, rules:['required', 'email'] },
+    { name:'Phone',     value:phone, rules:['required'] },
+    { name:'Hire Date', value:hireDate, rules:['required'] },
+    { name:'Username',  value:username, rules:['required'] },
+  ]);
+  if (!editingId && !password) errors.push('Password is required for new employees.');
+  if (password && password.length < 8) errors.push('Password must be at least 8 characters.');
+  if (errors.length > 0) { showErr(errors[0]); return; }
+
+  // Check for duplicate code / username
+  const dupCode = DB.find('employees', e => e.emp_code === code && e.id !== editingId);
+  if (dupCode) { showErr(`Employee code "${code}" is already in use.`); return; }
+  const dupUser = DB.find('users', u => u.username === username && u.employee_id !== editingId);
+  if (dupUser) { showErr(`Username "${username}" is already taken.`); return; }
+
+  const session = Auth.getSession();
+
+  if (editingId) {
+    DB.update('employees', editingId, { full_name:name, emp_code:code, email, phone, department_id:deptId, role_id:roleId, hire_date:hireDate, status, emergency_contact:emergency });
+    const user = DB.find('users', u => u.employee_id === editingId);
+    const userChanges = { username };
+    if (password) userChanges.password_hash = Auth.hash(password);
+    if (user) DB.update('users', user.id, userChanges);
+    DB.log(session.fullName, 'EMPLOYEE_EDIT', `Edited employee ${code} — ${name}`);
+    Utils.toast('Employee updated!', 'success');
+  } else {
+    const newEmp = DB.insert('employees', { full_name:name, emp_code:code, email, phone, department_id:deptId, role_id:roleId, hire_date:hireDate, status, emergency_contact:emergency, profile_image:null });
+    DB.insert('users', { employee_id:newEmp.id, username, password_hash:Auth.hash(password), last_login:null });
+    DB.log(session.fullName, 'EMPLOYEE_ADD', `Added new employee ${code} — ${name}`);
+    Utils.toast('Employee added!', 'success');
+  }
+
+  Utils.closeModal('emp-modal');
+  render();
+}
+
+function toggleStatus(id, current) {
+  const newStatus = current === 'active' ? 'inactive' : 'active';
+  const emp = DB.find('employees', e => e.id === id);
+  DB.update('employees', id, { status: newStatus });
+  const session = Auth.getSession();
+  DB.log(session.fullName, 'EMPLOYEE_STATUS', `${emp.emp_code} status changed to ${newStatus}`);
+  Utils.toast(`Employee ${newStatus === 'active' ? 'activated' : 'deactivated'}.`, 'info');
+  render();
+}
+
+render();
+</script>
+</body>
+</html>

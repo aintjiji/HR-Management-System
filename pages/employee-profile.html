@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<!--
+  employee-profile.html — Employee Profile Management
+  View and update personal details, emergency contacts.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Profile — HR Portal</title>
+  <link rel="stylesheet" href="../css/main.css">
+</head>
+<body>
+<button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <div class="top-bar">
+      <span class="top-bar-title" id="top-bar-title"></span>
+      <span class="top-bar-date" id="top-bar-date"></span>
+    </div>
+    <div class="page-content" id="page-content"></div>
+  </div>
+</div>
+
+<script src="../js/db.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/shell.js"></script>
+<script>
+DB.seed();
+const session = Shell.render({ type:'employee', activePage:'employee-profile.html', pageTitle:'My Profile' });
+let editing = false;
+
+function render() {
+  const emp = DB.find('employees', e => e.id === session.employeeId);
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">My Profile</h1>
+        <div class="page-sub">View and update your personal information</div>
+      </div>
+      <button class="btn ${editing ? 'btn-secondary' : 'btn-primary'}" onclick="toggleEdit()">
+        ${editing ? 'Cancel' : '✏ Edit Profile'}
+      </button>
+    </div>
+
+    <div style="display:grid; grid-template-columns:240px 1fr; gap:1rem;">
+
+      <!-- Avatar Card -->
+      <div class="card" style="text-align:center; height:fit-content;">
+        <div style="width:80px; height:80px; border-radius:50%; background:var(--accent-dim); border:3px solid var(--accent); display:flex; align-items:center; justify-content:center; font-size:2rem; font-weight:700; color:var(--accent); margin:0 auto 1rem;">
+          ${Utils.sanitize(emp.full_name.charAt(0))}
+        </div>
+        <div style="font-weight:600; font-size:1rem;">${Utils.sanitize(emp.full_name)}</div>
+        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px; font-family:var(--font-mono);">${Utils.sanitize(emp.emp_code)}</div>
+        <hr class="divider">
+        <div style="font-size:0.8rem; color:var(--text-secondary);">${Utils.sanitize(Utils.getRoleName(emp.role_id))}</div>
+        <div style="font-size:0.8rem; color:var(--text-muted);">${Utils.sanitize(Utils.getDepartmentName(emp.department_id))}</div>
+        <div style="margin-top:0.75rem;">${Utils.statusBadge(emp.status)}</div>
+        <hr class="divider">
+        <div style="font-size:0.75rem; color:var(--text-muted);">Joined ${Utils.formatDate(emp.hire_date)}</div>
+      </div>
+
+      <!-- Details Form -->
+      <div class="card">
+        ${editing ? renderEditForm(emp) : renderViewMode(emp)}
+      </div>
+    </div>
+
+    <!-- Change Password -->
+    <div class="card" style="margin-top:1rem;">
+      <div class="card-title" style="margin-bottom:1rem;">🔐 Change Password</div>
+      <div id="pw-error" class="alert alert-error" style="display:none"><span>⚠</span><span id="pw-error-msg"></span></div>
+      <div id="pw-success" class="alert alert-success" style="display:none"><span>✓</span><span>Password updated successfully.</span></div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Current Password</label>
+          <input type="password" id="cur-pw" class="form-input" placeholder="Enter current password">
+        </div>
+        <div></div>
+        <div class="form-group">
+          <label class="form-label">New Password</label>
+          <input type="password" id="new-pw" class="form-input" placeholder="Min. 8 characters">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm New Password</label>
+          <input type="password" id="con-pw" class="form-input" placeholder="Repeat new password">
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="changePassword()">Update Password</button>
+    </div>
+  `;
+}
+
+function renderViewMode(emp) {
+  const rows = [
+    ['Full Name', emp.full_name],
+    ['Email Address', emp.email],
+    ['Phone Number', emp.phone],
+    ['Emergency Contact', emp.emergency_contact],
+    ['Department', Utils.getDepartmentName(emp.department_id)],
+    ['Role / Position', Utils.getRoleName(emp.role_id)],
+    ['Hire Date', Utils.formatDate(emp.hire_date)],
+  ];
+  return `
+    <div class="card-title" style="margin-bottom:1.25rem;">Personal Information</div>
+    <div style="display:flex; flex-direction:column; gap:0.75rem;">
+      ${rows.map(([label, value]) => `
+        <div style="display:flex; gap:1rem; padding:0.6rem 0; border-bottom:1px solid var(--border);">
+          <div style="width:170px; font-size:0.78rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; flex-shrink:0;">${Utils.sanitize(label)}</div>
+          <div style="font-size:0.9rem;">${Utils.sanitize(value || '—')}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderEditForm(emp) {
+  return `
+    <div class="card-title" style="margin-bottom:1.25rem;">Edit Personal Information</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Email Address</label>
+        <input type="email" id="edit-email" class="form-input" value="${Utils.sanitize(emp.email)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Phone Number</label>
+        <input type="text" id="edit-phone" class="form-input" value="${Utils.sanitize(emp.phone)}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Emergency Contact</label>
+      <input type="text" id="edit-emergency" class="form-input" value="${Utils.sanitize(emp.emergency_contact)}"
+        placeholder="Name — Phone Number">
+      <div class="form-hint">Format: Full Name — Phone Number</div>
+    </div>
+    <button class="btn btn-primary" onclick="saveProfile()">Save Changes</button>
+  `;
+}
+
+function toggleEdit() {
+  editing = !editing;
+  render();
+}
+
+function saveProfile() {
+  const email     = document.getElementById('edit-email').value.trim();
+  const phone     = document.getElementById('edit-phone').value.trim();
+  const emergency = Utils.stripTags(document.getElementById('edit-emergency').value.trim());
+
+  const errors = Utils.validateForm([
+    { name: 'Email',             value: email,     rules: ['required', 'email'] },
+    { name: 'Phone',             value: phone,     rules: ['required', 'phone'] },
+    { name: 'Emergency Contact', value: emergency, rules: ['required'] },
+  ]);
+
+  if (errors.length > 0) {
+    Utils.toast(errors[0], 'error');
+    return;
+  }
+
+  DB.update('employees', session.employeeId, { email, phone, emergency_contact: emergency });
+  DB.log(session.fullName, 'PROFILE_UPDATE', 'Updated email, phone, and emergency contact.');
+  editing = false;
+  Utils.toast('Profile updated!', 'success');
+  render();
+}
+
+function changePassword() {
+  const curPw  = document.getElementById('cur-pw').value;
+  const newPw  = document.getElementById('new-pw').value;
+  const conPw  = document.getElementById('con-pw').value;
+
+  document.getElementById('pw-error').style.display   = 'none';
+  document.getElementById('pw-success').style.display = 'none';
+
+  const showErr = (msg) => {
+    document.getElementById('pw-error').style.display = 'flex';
+    document.getElementById('pw-error-msg').textContent = msg;
+  };
+
+  if (!curPw || !newPw || !conPw) { showErr('All fields are required.'); return; }
+  if (newPw.length < 8)           { showErr('New password must be at least 8 characters.'); return; }
+  if (newPw !== conPw)            { showErr('Passwords do not match.'); return; }
+
+  const user = DB.find('users', u => u.employee_id === session.employeeId);
+  if (user.password_hash !== Auth.hash(curPw)) {
+    showErr('Current password is incorrect.');
+    return;
+  }
+
+  DB.update('users', user.id, { password_hash: Auth.hash(newPw) });
+  DB.log(session.fullName, 'PASSWORD_CHANGE', 'Employee changed their password.');
+  document.getElementById('pw-success').style.display = 'flex';
+  document.getElementById('cur-pw').value = '';
+  document.getElementById('new-pw').value = '';
+  document.getElementById('con-pw').value = '';
+}
+
+render();
+</script>
+</body>
+</html>
