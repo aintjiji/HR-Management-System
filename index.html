@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<!--
+  index.html — HR Portal Login Page
+  Entry point for all users (employees & administrators).
+  Handles role-based routing post-authentication.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HR Portal — Login</title>
+  <link rel="stylesheet" href="css/main.css">
+  <style>
+    /* Tab switcher on login form */
+    .login-tabs {
+      display: flex;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 3px;
+      margin-bottom: 1.75rem;
+    }
+    .login-tab {
+      flex: 1;
+      padding: 0.5rem;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.2s;
+      font-family: var(--font-body);
+    }
+    .login-tab.active {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      box-shadow: var(--shadow-sm);
+    }
+    .demo-creds {
+      margin-top: 1.5rem;
+      padding: 0.85rem;
+      background: rgba(88,166,255,0.07);
+      border: 1px solid rgba(88,166,255,0.2);
+      border-radius: var(--radius-sm);
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+    }
+    .demo-creds strong { color: var(--info); }
+    .demo-creds code {
+      font-family: var(--font-mono);
+      color: var(--accent);
+    }
+    .demo-row { display: flex; justify-content: space-between; margin-top: 0.3rem; }
+  </style>
+</head>
+<body>
+
+<div class="login-page">
+
+  <!-- ── Hero Panel ── -->
+  <div class="login-hero">
+    <div class="hero-brand">
+      <div class="logo-mark">HR<br>PORTAL</div>
+      <div class="tagline">Workforce Management System</div>
+    </div>
+    <div class="hero-features">
+      <div class="hero-feature">
+        <div class="feat-icon">🔐</div>
+        <div>
+          <h4>Role-Based Access Control</h4>
+          <p>Separate, secure portals for employees and administrators.</p>
+        </div>
+      </div>
+      <div class="hero-feature">
+        <div class="feat-icon">📍</div>
+        <div>
+          <h4>Geofenced Attendance</h4>
+          <p>Location-validated check-ins ensure on-site presence.</p>
+        </div>
+      </div>
+      <div class="hero-feature">
+        <div class="feat-icon">📋</div>
+        <div>
+          <h4>Full Audit Trail</h4>
+          <p>Every action logged with timestamps and IP addresses.</p>
+        </div>
+      </div>
+      <div class="hero-feature">
+        <div class="feat-icon">📊</div>
+        <div>
+          <h4>Real-Time Analytics</h4>
+          <p>Live attendance metrics and department-level reporting.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Login Panel ── -->
+  <div class="login-panel">
+    <div class="login-box">
+      <h2 class="login-title">Welcome back</h2>
+      <p class="login-sub">Sign in to access your portal</p>
+
+      <!-- Role Tabs -->
+      <div class="login-tabs">
+        <button class="login-tab active" onclick="switchTab('employee')">👤 Employee</button>
+        <button class="login-tab" onclick="switchTab('admin')">🔧 Administrator</button>
+      </div>
+
+      <!-- Error Alert -->
+      <div id="login-error" class="alert alert-error" style="display:none">
+        <span>⚠</span>
+        <span id="login-error-msg"></span>
+      </div>
+
+      <!-- Login Form -->
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input
+          type="text"
+          id="username"
+          class="form-input"
+          placeholder="Enter your username"
+          autocomplete="username"
+          spellcheck="false"
+        >
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input
+          type="password"
+          id="password"
+          class="form-input"
+          placeholder="Enter your password"
+          autocomplete="current-password"
+        >
+      </div>
+
+      <button class="btn btn-primary btn-full" onclick="handleLogin()" id="login-btn">
+        Sign In →
+      </button>
+
+      <!-- Demo Credentials -->
+      <div class="demo-creds">
+        <strong>Demo Credentials</strong>
+        <div class="demo-row"><span>Employee:</span> <span><code>alice</code> / <code>pass123</code></span></div>
+        <div class="demo-row"><span>Employee:</span> <span><code>carlos</code> / <code>pass123</code></span></div>
+        <div class="demo-row"><span>Admin:</span> <span><code>admin</code> / <code>admin123</code></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/utils.js"></script>
+<script>
+  // Initialize DB on first load
+  DB.seed();
+
+  // Redirect if already logged in
+  const existingSession = Auth.getSession();
+  if (existingSession) {
+    redirect(existingSession.type);
+  }
+
+  let activeTab = 'employee';
+
+  function switchTab(tab) {
+    activeTab = tab;
+    document.querySelectorAll('.login-tab').forEach((btn, i) => {
+      btn.classList.toggle('active', (i === 0 && tab === 'employee') || (i === 1 && tab === 'admin'));
+    });
+    clearError();
+    document.getElementById('username').value = '';
+    document.getElementById('password').value = '';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('login-error');
+    document.getElementById('login-error-msg').textContent = msg;
+    el.style.display = 'flex';
+  }
+
+  function clearError() {
+    document.getElementById('login-error').style.display = 'none';
+  }
+
+  function redirect(type) {
+    if (type === 'admin') {
+      window.location.href = 'pages/admin-dashboard.html';
+    } else {
+      window.location.href = 'pages/employee-dashboard.html';
+    }
+  }
+
+  function handleLogin() {
+    clearError();
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+
+    if (!username || !password) {
+      showError('Please enter your username and password.');
+      return;
+    }
+
+    const btn = document.getElementById('login-btn');
+    btn.textContent = 'Signing in…';
+    btn.disabled = true;
+
+    // Slight delay for UX
+    setTimeout(() => {
+      let result;
+      if (activeTab === 'employee') {
+        result = Auth.loginEmployee(username, password);
+      } else {
+        result = Auth.loginAdmin(username, password);
+      }
+
+      if (result.success) {
+        btn.textContent = '✓ Redirecting…';
+        setTimeout(() => redirect(activeTab), 400);
+      } else {
+        showError(result.error);
+        btn.textContent = 'Sign In →';
+        btn.disabled = false;
+      }
+    }, 300);
+  }
+
+  // Allow Enter key submission
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleLogin();
+  });
+</script>
+</body>
+</html>
